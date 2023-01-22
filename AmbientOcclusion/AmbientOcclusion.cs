@@ -38,6 +38,7 @@ public class AmbientOcclusion : ScriptableRendererFeature
         [InspectorToggleLeft] public bool Debug = false;
         [InspectorToggleLeft] public bool Debug_AOOnly = false;
         public AO_Methods AOMethod = AO_Methods.GTAO;
+        public bool FullPrecision = false;
     }
     public enum AO_Methods
     {
@@ -133,6 +134,7 @@ public class AmbientOcclusion : ScriptableRendererFeature
             BlurMaterial.SetInt(P_KernelRadius_ID, Denoise_Settings.Kernel_Radius);
 
             if (AO_Settings.TemporalJitter) { AoMaterial.EnableKeyword("USE_TEMPORALNOISE"); }
+            if (Render_Basic_Settings.FullPrecision) { AoMaterial.EnableKeyword("FULL_PRECISION_AO"); BlurMaterial.EnableKeyword("FULL_PRECISION_AO"); }
 
             CommandBuffer cmd = CommandBufferPool.Get(Render_Basic_Settings.RenderPassName);
             using (new ProfilingScope(cmd, profilingSampler))
@@ -204,7 +206,7 @@ public class AmbientOcclusion : ScriptableRendererFeature
     private RenderPass RenderPass_Instance;
     public override void Create()
     {
-        this.RenderPass_Instance = new RenderPass(Denoise_Settings, AO_Settings, Render_Basic_Settings);
+        RenderPass_Instance = new RenderPass(Denoise_Settings, AO_Settings, Render_Basic_Settings);
         RenderPass_Instance.renderPassEvent = Render_Basic_Settings.passEvent + Render_Basic_Settings.passEventOffset;
     }
 
