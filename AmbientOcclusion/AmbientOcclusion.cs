@@ -67,7 +67,7 @@ public class AmbientOcclusion : ScriptableRendererFeature
         private static readonly int P_TemporalFilterIntensity_ID = Shader.PropertyToID("TemporalFilterIntensity");
 
         private static readonly int RT_AoBase_ID = Shader.PropertyToID("_RT_AoBase");
-        private static readonly int RT_AO_Camera_Temp = Shader.PropertyToID("_RT_AO_Camera_Temp");
+        private static readonly int RT_AO_Camera_Temp_ID = Shader.PropertyToID("_RT_AO_Camera_Temp");
         private static readonly int RT_AoBlur_Spatial_X_ID = Shader.PropertyToID("_RT_AoBlur_Spatial_X");
         private static readonly int RT_AoBlur_Spatial_Y_ID = Shader.PropertyToID("_RT_AoBlur_Spatial_Y");
         private static readonly int AO_Current_RT_ID = Shader.PropertyToID("_AO_Current_RT");
@@ -179,12 +179,13 @@ public class AmbientOcclusion : ScriptableRendererFeature
                 if (Render_Basic_Settings.Debug)
                 {
                     if (Render_Basic_Settings.Debug_AOOnly) { BlurMaterial.EnableKeyword("DEBUG_AO_ONLY"); }
-                    cmd.GetTemporaryRT(RT_AO_Camera_Temp, AoTextureDesc, FilterMode.Bilinear);
-                    cmd.Blit(renderingData.cameraData.renderer.cameraColorTarget, RT_AO_Camera_Temp);
+                    cmd.GetTemporaryRT(RT_AO_Camera_Temp_ID, AoTextureDesc, FilterMode.Bilinear);
+                    cmd.Blit(renderingData.cameraData.renderer.cameraColorTarget, RT_AO_Camera_Temp_ID);
 
-                    cmd.SetGlobalTexture(RT_AO_CameraTexture_ID, RT_AO_Camera_Temp);
+                    cmd.SetGlobalTexture(RT_AO_CameraTexture_ID, RT_AO_Camera_Temp_ID);
                     cmd.SetRenderTarget(renderingData.cameraData.renderer.cameraColorTarget);
                     cmd.DrawMesh(RenderingUtils.fullscreenMesh, Matrix4x4.identity, BlurMaterial, 0, 5);
+                    cmd.ReleaseTemporaryRT(RT_AO_Camera_Temp_ID);
                 }
                 //后处理结束
                 cmd.SetViewProjectionMatrices(camera.worldToCameraMatrix, camera.projectionMatrix);
