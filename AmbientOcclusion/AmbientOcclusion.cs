@@ -24,10 +24,11 @@ public class AmbientOcclusion : ScriptableRendererFeature
         [Range(0f, 10f)] public float Intensity = 1;
         [Range(0f, 1f)] public float Radius = 0.5f;
         [Range(1, 10)] public int Num_Direction = 4;
-        [Range(3, 10)] public int Num_Step = 8;
+        [Range(3, 50)] public int Num_Step = 8;
         [Range(0f, 0.6f)] public float AngleBias = 0.1f;
         [Range(0f, 1f)] public float AoDistanceAttenuation = 0.1f;
         [Range(1, 2000)] public int MaxDistance = 1000;
+        [InspectorToggleLeft] public bool MultiBounce = true;
     }
     [System.Serializable]
     public class RenderBasicSettings
@@ -36,7 +37,6 @@ public class AmbientOcclusion : ScriptableRendererFeature
         public RenderPassEvent passEvent = RenderPassEvent.BeforeRenderingPostProcessing;
         public int passEventOffset = 1;
         [InspectorToggleLeft] public bool Debug = false;
-        [InspectorToggleLeft] public bool Debug_AOOnly = false;
         public AO_Methods AOMethod = AO_Methods.GTAO;
         public bool FullPrecision = false;
     }
@@ -76,7 +76,8 @@ public class AmbientOcclusion : ScriptableRendererFeature
         private static readonly int AO_Previous_RT_ID = Shader.PropertyToID("_AO_Previous_RT");
         private static readonly int RT_Spatial_In_X_ID = Shader.PropertyToID("RT_Spatial_In_X");
         private static readonly int RT_Spatial_In_Y_ID = Shader.PropertyToID("RT_Spatial_In_Y");
-        private static readonly int RT_AO_CameraTexture_ID = Shader.PropertyToID("AO_CameraTexture");
+        private static readonly int RT_MultiBounce_Out_ID = Shader.PropertyToID("RT_MultiBounce_Out");
+        private static readonly int RT_MultiBounce_In_ID = Shader.PropertyToID("RT_MultiBounce_In");
         private static readonly int GLOBAL_RT_AmbientOcclusion_ID = Shader.PropertyToID("AmbientOcclusion");
 
         private RenderTexture AO_Previous_RT;
@@ -102,17 +103,18 @@ public class AmbientOcclusion : ScriptableRendererFeature
             //历史信息
             if (AO_Previous_RT == null || AO_Previous_RT.width != camera.pixelWidth || AO_Previous_RT.height != camera.pixelHeight)
             {
-                AO_Previous_RT = RenderTexture.GetTemporary(camera.pixelWidth, camera.pixelHeight, 0, GraphicsFormat.B8G8R8A8_UNorm);
-                AO_Previous_RT.filterMode = FilterMode.Bilinear;
+                AO_Previous_RT = RenderTexture.GetTemporary(camera.pixelWidth, camera.pixelHeight, 0, GraphicsFormat.R16_UNorm);
+                AO_Previous_RT.filterMode = FilterMode.Point;
             }
         }
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
             Camera camera = renderingData.cameraData.camera;
-            RenderTextureDescriptor AoTextureDesc = new RenderTextureDescriptor(camera.pixelWidth, camera.pixelHeight, GraphicsFormat.B10G11R11_UFloatPack32, GraphicsFormat.None);
-            if (!Render_Basic_Settings.Debug) { AoTextureDesc.graphicsFormat = GraphicsFormat.R16_UNorm; }
+            RenderTextureDescriptor AoTextureDesc = new RenderTextureDescriptor(camera.pixelWidth, camera.pixelHeight, GraphicsFormat.R16_UNorm, GraphicsFormat.None);
+            RenderTextureDescriptor AoTextureDesc_Color = new RenderTextureDescriptor(camera.pixelWidth, camera.pixelHeight, GraphicsFormat.B10G11R11_UFloatPack32, GraphicsFormat.None);
             AoTextureDesc.depthBufferBits = 0;
-            
+            AoTextureDesc_Color.depthBufferBits = 0;
+
             var AoMaterial = new Material(Shader.Find("PostProcess/AmbientOcclusion"));
             var BlurMaterial = new Material(Shader.Find("PostProcess/AmbientOcclusion"));
             AoMaterial.SetMatrix(P_World2View_Matrix_ID, camera.worldToCameraMatrix);
@@ -135,14 +137,24 @@ public class AmbientOcclusion : ScriptableRendererFeature
 
             if (AO_Settings.TemporalJitter) { AoMaterial.EnableKeyword("USE_TEMPORALNOISE"); }
             if (Render_Basic_Settings.FullPrecision) { AoMaterial.EnableKeyword("FULL_PRECISION_AO"); BlurMaterial.EnableKeyword("FULL_PRECISION_AO"); }
+            if (AO_Settings.MultiBounce) { BlurMaterial.EnableKeyword("MULTI_BOUNCE_AO"); }
 
             CommandBuffer cmd = CommandBufferPool.Get(Render_Basic_Settings.RenderPassName);
             using (new ProfilingScope(cmd, profilingSampler))
             {
-                cmd.GetTemporaryRT(RT_AoBase_ID, AoTextureDesc, FilterMode.Bilinear);
-                cmd.GetTemporaryRT(RT_AoBlur_Spatial_X_ID, AoTextureDesc, FilterMode.Bilinear);
-                cmd.GetTemporaryRT(RT_AoBlur_Spatial_Y_ID, AoTextureDesc, FilterMode.Bilinear);
-                cmd.GetTemporaryRT(AO_Current_RT_ID, AoTextureDesc, FilterMode.Bilinear);
+                cmd.GetTemporaryRT(RT_AoBase_ID, AoTextureDesc, FilterMode.Point);
+                cmd.GetTemporaryRT(RT_AoBlur_Spatial_X_ID, AoTextureDesc, FilterMode.Point);
+                cmd.GetTemporaryRT(RT_AoBlur_Spatial_Y_ID, AoTextureDesc, FilterMode.Point);
+                cmd.GetTemporaryRT(AO_Current_RT_ID, AoTextureDesc, FilterMode.Point);
+                if (AO_Settings.MultiBounce)
+                {
+                    cmd.GetTemporaryRT(RT_MultiBounce_Out_ID, AoTextureDesc_Color, FilterMode.Point);
+                }
+                else
+                {
+                    cmd.GetTemporaryRT(RT_MultiBounce_Out_ID, AoTextureDesc, FilterMode.Point);
+                }
+                
 
                 //开始后处理
                 cmd.SetViewProjectionMatrices(Matrix4x4.identity, Matrix4x4.identity);
@@ -160,7 +172,7 @@ public class AmbientOcclusion : ScriptableRendererFeature
                     cmd.DrawMesh(RenderingUtils.fullscreenMesh, Matrix4x4.identity, BlurMaterial, 0, 4);
                     cmd.Blit(AO_Current_RT_ID, AO_Previous_RT);
                 }
-                else { cmd.Blit(RT_AoBase_ID, AO_Current_RT_ID); }
+                else { cmd.CopyTexture(RT_AoBase_ID, AO_Current_RT_ID); }
 
                 //双边滤波
                 if (Denoise_Settings.SpatialFilter)
@@ -174,20 +186,22 @@ public class AmbientOcclusion : ScriptableRendererFeature
                     cmd.SetRenderTarget(RT_AoBlur_Spatial_Y_ID);
                     cmd.DrawMesh(RenderingUtils.fullscreenMesh, Matrix4x4.identity, BlurMaterial, 0, 3);
                 }
-                else { cmd.Blit(AO_Current_RT_ID, RT_AoBlur_Spatial_Y_ID); }
+                else { cmd.CopyTexture(AO_Current_RT_ID, RT_AoBlur_Spatial_Y_ID); }
+                //MultiBounce
+                if (AO_Settings.MultiBounce)
+                {
+                    cmd.SetGlobalTexture(RT_MultiBounce_In_ID, RT_AoBlur_Spatial_Y_ID);
+                    cmd.SetRenderTarget(RT_MultiBounce_Out_ID);
+                    cmd.DrawMesh(RenderingUtils.fullscreenMesh, Matrix4x4.identity, BlurMaterial, 0, 6);
+                }
+                else { cmd.CopyTexture(RT_AoBlur_Spatial_Y_ID, RT_MultiBounce_Out_ID); }
 
                 //拷贝到屏幕
-                cmd.SetGlobalTexture(GLOBAL_RT_AmbientOcclusion_ID, RT_AoBlur_Spatial_Y_ID);
+                cmd.SetGlobalTexture(GLOBAL_RT_AmbientOcclusion_ID, RT_MultiBounce_Out_ID);
                 if (Render_Basic_Settings.Debug)
                 {
-                    if (Render_Basic_Settings.Debug_AOOnly) { BlurMaterial.EnableKeyword("DEBUG_AO_ONLY"); }
-                    cmd.GetTemporaryRT(RT_AO_Camera_Temp_ID, AoTextureDesc, FilterMode.Bilinear);
-                    cmd.Blit(renderingData.cameraData.renderer.cameraColorTarget, RT_AO_Camera_Temp_ID);
-
-                    cmd.SetGlobalTexture(RT_AO_CameraTexture_ID, RT_AO_Camera_Temp_ID);
                     cmd.SetRenderTarget(renderingData.cameraData.renderer.cameraColorTarget);
                     cmd.DrawMesh(RenderingUtils.fullscreenMesh, Matrix4x4.identity, BlurMaterial, 0, 5);
-                    cmd.ReleaseTemporaryRT(RT_AO_Camera_Temp_ID);
                 }
                 //后处理结束
                 cmd.SetViewProjectionMatrices(camera.worldToCameraMatrix, camera.projectionMatrix);
@@ -201,6 +215,7 @@ public class AmbientOcclusion : ScriptableRendererFeature
             cmd.ReleaseTemporaryRT(RT_AoBlur_Spatial_X_ID);
             cmd.ReleaseTemporaryRT(RT_AoBase_ID);
             cmd.ReleaseTemporaryRT(AO_Current_RT_ID);
+            cmd.ReleaseTemporaryRT(RT_MultiBounce_Out_ID);
         }
     }
     private RenderPass RenderPass_Instance;

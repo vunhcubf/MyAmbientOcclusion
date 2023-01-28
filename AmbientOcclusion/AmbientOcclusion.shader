@@ -85,24 +85,23 @@ Shader "PostProcess/AmbientOcclusion"
         Tags{"LightMode"="PostProcess"}
             HLSLPROGRAM
             #include "AoBlur.hlsl"
-            #pragma shader_feature DEBUG_AO_ONLY
             #pragma vertex Vert_PostProcessDefault
             #pragma fragment Frag_BlendToScreen
             #pragma shader_feature FULL_PRECISION_AO
+            #pragma shader_feature MULTI_BOUNCE_AO
             ENDHLSL
         }
         Pass
         {
-        Name "CopyDepth"
+        Name "MultiBounce"
         ZWrite Off
         ZTest Always
         CUll off
         Tags{"LightMode"="PostProcess"}
             HLSLPROGRAM
             #include "AoBlur.hlsl"
-            #pragma shader_feature DEBUG_AO_ONLY
             #pragma vertex Vert_PostProcessDefault
-            #pragma fragment Frag_CopyDepth
+            #pragma fragment Frag_MultiBounce
             #pragma shader_feature FULL_PRECISION_AO
             ENDHLSL
         }
