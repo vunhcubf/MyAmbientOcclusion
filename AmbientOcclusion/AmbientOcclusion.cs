@@ -68,7 +68,7 @@ public class AmbientOcclusion : ScriptableRendererFeature
         private static readonly int P_TemporalFilterIntensity_ID = Shader.PropertyToID("TemporalFilterIntensity");
 
         private static readonly int RT_AoBase_ID = Shader.PropertyToID("_RT_AoBase");
-        private static readonly int RT_AO_Camera_Temp_ID = Shader.PropertyToID("_RT_AO_Camera_Temp");
+
         private static readonly int RT_AoBlur_Spatial_X_ID = Shader.PropertyToID("_RT_AoBlur_Spatial_X");
         private static readonly int RT_AoBlur_Spatial_Y_ID = Shader.PropertyToID("_RT_AoBlur_Spatial_Y");
         private static readonly int AO_Current_RT_ID = Shader.PropertyToID("_AO_Current_RT");
@@ -169,6 +169,7 @@ public class AmbientOcclusion : ScriptableRendererFeature
                     cmd.SetGlobalTexture(RT_Temporal_In_ID, RT_AoBase_ID);
                     BlurMaterial.SetFloat(P_TemporalFilterIntensity_ID, Denoise_Settings.TemporalFilterIntensity);
                     cmd.SetRenderTarget(AO_Current_RT_ID);
+                    BlurMaterial.SetTexture(AO_Previous_RT_ID, AO_Previous_RT);
                     cmd.DrawMesh(RenderingUtils.fullscreenMesh, Matrix4x4.identity, BlurMaterial, 0, 4);
                     cmd.Blit(AO_Current_RT_ID, AO_Previous_RT);
                 }
@@ -177,7 +178,6 @@ public class AmbientOcclusion : ScriptableRendererFeature
                 //双边滤波
                 if (Denoise_Settings.SpatialFilter)
                 {
-                    BlurMaterial.SetTexture(AO_Previous_RT_ID, AO_Previous_RT);
                     cmd.SetGlobalTexture(RT_Spatial_In_X_ID, AO_Current_RT_ID);
                     cmd.SetRenderTarget(RT_AoBlur_Spatial_X_ID);
                     cmd.DrawMesh(RenderingUtils.fullscreenMesh, Matrix4x4.identity, BlurMaterial, 0, 2);
@@ -204,6 +204,7 @@ public class AmbientOcclusion : ScriptableRendererFeature
                     cmd.DrawMesh(RenderingUtils.fullscreenMesh, Matrix4x4.identity, BlurMaterial, 0, 5);
                 }
                 //后处理结束
+                cmd.SetRenderTarget(renderingData.cameraData.renderer.cameraColorTarget);
                 cmd.SetViewProjectionMatrices(camera.worldToCameraMatrix, camera.projectionMatrix);
             }
             context.ExecuteCommandBuffer(cmd);

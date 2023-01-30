@@ -78,19 +78,19 @@ half2 GetClosestUv(half2 uv){//要使用去除抖动的uv
 	}
 	return _CameraDepthTexture_TexelSize.xy*Closest_Offset+uv;
 }
-void GetBoundingBox(out half3 cmin,out half3 cmax,half2 uv){
+void GetBoundingBox(out half cmin,out half cmax,half2 uv){
 	half2 du=half2(1,0)*RT_Temporal_In_TexelSize.xy;
 	half2 dv=half2(0,1)*RT_Temporal_In_TexelSize.xy;
 
-	half3 ctl = tex2D(RT_Temporal_In, uv - dv - du).rgb;
-	half3 ctc = tex2D(RT_Temporal_In, uv - dv).rgb;
-	half3 ctr = tex2D(RT_Temporal_In, uv - dv + du).rgb;
-	half3 cml = tex2D(RT_Temporal_In, uv - du).rgb;
-	half3 cmc = tex2D(RT_Temporal_In, uv).rgb;
-	half3 cmr = tex2D(RT_Temporal_In, uv + du).rgb;
-	half3 cbl = tex2D(RT_Temporal_In, uv + dv - du).rgb;
-	half3 cbc = tex2D(RT_Temporal_In, uv + dv).rgb;
-	half3 cbr = tex2D(RT_Temporal_In, uv + dv + du).rgb;
+	half ctl = tex2D(RT_Temporal_In, uv - dv - du).rgb;
+	half ctc = tex2D(RT_Temporal_In, uv - dv).rgb;
+	half ctr = tex2D(RT_Temporal_In, uv - dv + du).rgb;
+	half cml = tex2D(RT_Temporal_In, uv - du).rgb;
+	half cmc = tex2D(RT_Temporal_In, uv).rgb;
+	half cmr = tex2D(RT_Temporal_In, uv + du).rgb;
+	half cbl = tex2D(RT_Temporal_In, uv + dv - du).rgb;
+	half cbc = tex2D(RT_Temporal_In, uv + dv).rgb;
+	half cbr = tex2D(RT_Temporal_In, uv + dv + du).rgb;
 
 	cmin = min(ctl, min(ctc, min(ctr, min(cml, min(cmc, min(cmr, min(cbl, min(cbc, cbr))))))));
 	cmax = max(ctl, max(ctc, max(ctr, max(cml, max(cmc, max(cmr, max(cbl, max(cbc, cbr))))))));
@@ -169,13 +169,13 @@ half4 Frag_TemporalFilter(VertexOutput i):SV_Target{
 	half ViewDistance=SampleSceneDepth(Closest_uv);
 	ViewDistance=LinearEyeDepth(ViewDistance,_ZBufferParams);
 	//灰度的包围盒
-	half3 AABBMin,AABBMax;
+	half AABBMin,AABBMax;
 	GetBoundingBox(AABBMin,AABBMax,i.uv);
-	half3 AO_Pre=tex2D(_AO_Previous_RT,i.uv-Velocity).rgb;
-	half3 AO_Cur=tex2D(RT_Temporal_In,i.uv).rgb;
+	half AO_Pre=tex2D(_AO_Previous_RT,i.uv-Velocity).r;
+	half AO_Cur=tex2D(RT_Temporal_In,i.uv).r;
 	AO_Pre=clamp(AO_Pre,AABBMin,AABBMax);
-	half lum0 = Luminance(AO_Cur.rgb);
-	half lum1 = Luminance(AO_Pre.rgb);
+	half lum0 = AO_Cur;
+	half lum1 = AO_Pre;
 	half unbiased_diff = abs(lum0 - lum1) / max(lum0, max(lum1, 0.2));
 	half unbiased_weight=saturate(1-unbiased_diff);
 	half BlendFactor=saturate(pow(unbiased_weight,1.1-TemporalFilterIntensity))*saturate(rcp(0.8*Pow2(length(Velocity))+0.8));
