@@ -1,5 +1,4 @@
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareNormalsTexture.hlsl"
-#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
 #if defined FULL_PRECISION_AO
@@ -11,6 +10,18 @@
 #define half3x3 float3x3
 #endif
 
+//declaredepth这个库，指定lod等级
+TEXTURE2D_X_FLOAT(_CameraDepthTexture);
+SamplerState Point_Clamp;
+SamplerState Linear_Clamp;
+half SampleSceneDepth(half2 uv)
+{
+    return SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, Point_Clamp, UnityStereoTransformScreenSpaceTex(uv),0).r;
+}
+//*******************************
+bool GetSkyBoxMask(half2 uv){
+    return step(SampleSceneDepth(uv),0);
+}
 int Kernel_Radius;
 half BlurSharpness;
 
@@ -82,15 +93,15 @@ void GetBoundingBox(out half cmin,out half cmax,half2 uv){
 	half2 du=half2(1,0)*RT_Temporal_In_TexelSize.xy;
 	half2 dv=half2(0,1)*RT_Temporal_In_TexelSize.xy;
 
-	half ctl = tex2D(RT_Temporal_In, uv - dv - du).rgb;
-	half ctc = tex2D(RT_Temporal_In, uv - dv).rgb;
-	half ctr = tex2D(RT_Temporal_In, uv - dv + du).rgb;
-	half cml = tex2D(RT_Temporal_In, uv - du).rgb;
-	half cmc = tex2D(RT_Temporal_In, uv).rgb;
-	half cmr = tex2D(RT_Temporal_In, uv + du).rgb;
-	half cbl = tex2D(RT_Temporal_In, uv + dv - du).rgb;
-	half cbc = tex2D(RT_Temporal_In, uv + dv).rgb;
-	half cbr = tex2D(RT_Temporal_In, uv + dv + du).rgb;
+	half ctl = tex2D(RT_Temporal_In, uv - dv - du).r;
+	half ctc = tex2D(RT_Temporal_In, uv - dv).r;
+	half ctr = tex2D(RT_Temporal_In, uv - dv + du).r;
+	half cml = tex2D(RT_Temporal_In, uv - du).r;
+	half cmc = tex2D(RT_Temporal_In, uv).r;
+	half cmr = tex2D(RT_Temporal_In, uv + du).r;
+	half cbl = tex2D(RT_Temporal_In, uv + dv - du).r;
+	half cbc = tex2D(RT_Temporal_In, uv + dv).r;
+	half cbr = tex2D(RT_Temporal_In, uv + dv + du).r;
 
 	cmin = min(ctl, min(ctc, min(ctr, min(cml, min(cmc, min(cmr, min(cbl, min(cbc, cbr))))))));
 	cmax = max(ctl, max(ctc, max(ctr, max(cml, max(cmc, max(cmr, max(cbl, max(cbc, cbr))))))));
@@ -137,7 +148,9 @@ VertexOutput Vert_PostProcessDefault(VertexInput v){
     return o;
 }
 
-half4 Frag_Bilateral_X(VertexOutput i):SV_Target{
+half Frag_Bilateral_X(VertexOutput i):SV_Target{
+	[branch]
+    if(GetSkyBoxMask(i.uv)){return 1.0;}
     half2 deltaUV=half2(1,0)*RT_Temporal_In_TexelSize.xy;
     half totalAO;
 	half depth;
@@ -150,7 +163,9 @@ half4 Frag_Bilateral_X(VertexOutput i):SV_Target{
 	totalAO /= totalW;
 	return totalAO;
 }
-half4 Frag_Bilateral_Y(VertexOutput i):SV_Target{
+half Frag_Bilateral_Y(VertexOutput i):SV_Target{
+	[branch]
+    if(GetSkyBoxMask(i.uv)){return 1.0;}
     half2 deltaUV=half2(0,1)*RT_Temporal_In_TexelSize.xy;
     half totalAO;
 	half depth;
@@ -163,11 +178,12 @@ half4 Frag_Bilateral_Y(VertexOutput i):SV_Target{
 	totalAO /= totalW;
 	return totalAO;
 }
-half4 Frag_TemporalFilter(VertexOutput i):SV_Target{
+half Frag_TemporalFilter(VertexOutput i):SV_Target{
+	[branch]
+    if(GetSkyBoxMask(i.uv)){return 1.0;}
 	half2 Closest_uv=GetClosestUv(i.uv);
     half2 Velocity=SAMPLE_TEXTURE2D_X(_MotionVectorTexture,sampler_MotionVectorTexture,Closest_uv).rg;
-	half ViewDistance=SampleSceneDepth(Closest_uv);
-	ViewDistance=LinearEyeDepth(ViewDistance,_ZBufferParams);
+	
 	//灰度的包围盒
 	half AABBMin,AABBMax;
 	GetBoundingBox(AABBMin,AABBMax,i.uv);
@@ -179,8 +195,8 @@ half4 Frag_TemporalFilter(VertexOutput i):SV_Target{
 	half unbiased_diff = abs(lum0 - lum1) / max(lum0, max(lum1, 0.2));
 	half unbiased_weight=saturate(1-unbiased_diff);
 	half BlendFactor=saturate(pow(unbiased_weight,1.1-TemporalFilterIntensity))*saturate(rcp(0.8*Pow2(length(Velocity))+0.8));
-	half3 AO=lerp(AO_Cur,AO_Pre,BlendFactor);
-	return half4(AO,1);
+	half AO=lerp(AO_Cur,AO_Pre,BlendFactor);
+	return AO;
 }
 half4 Frag_BlendToScreen(VertexOutput i):SV_Target{
 	#if defined MULTI_BOUNCE_AO
@@ -191,6 +207,8 @@ half4 Frag_BlendToScreen(VertexOutput i):SV_Target{
 	return half4(Ao,1);
 }
 half4 Frag_MultiBounce(VertexOutput i):SV_Target{
+	[branch]
+    if(GetSkyBoxMask(i.uv)){return 1.0;}
 	half3 BaseColor=SAMPLE_TEXTURE2D(_GBuffer0,sampler_GBuffer0,i.uv).xyz;
 	half Ao=SAMPLE_TEXTURE2D(RT_MultiBounce_In,sampler_RT_MultiBounce_In,i.uv).x;
 	return half4(AOMultiBounce(BaseColor,Ao),1);

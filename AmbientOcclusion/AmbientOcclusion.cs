@@ -101,10 +101,20 @@ public class AmbientOcclusion : ScriptableRendererFeature
         {
             var camera = renderingData.cameraData.camera;
             //历史信息
-            if (AO_Previous_RT == null || AO_Previous_RT.width != camera.pixelWidth || AO_Previous_RT.height != camera.pixelHeight)
+            if (AO_Previous_RT is null)
             {
-                AO_Previous_RT = RenderTexture.GetTemporary(camera.pixelWidth, camera.pixelHeight, 0, GraphicsFormat.R16_UNorm);
-                AO_Previous_RT.filterMode = FilterMode.Point;
+                AO_Previous_RT = new RenderTexture(camera.pixelWidth, camera.pixelHeight, 0, GraphicsFormat.R16_UNorm);
+                AO_Previous_RT.Create();
+            }
+            if (camera.pixelWidth != AO_Previous_RT.width || camera.pixelHeight != AO_Previous_RT.height)
+            {
+                AO_Previous_RT.DiscardContents();
+                AO_Previous_RT.Release();
+                DestroyImmediate(AO_Previous_RT);
+                AO_Previous_RT = null;
+
+                AO_Previous_RT =new RenderTexture(camera.pixelWidth, camera.pixelHeight, 0, GraphicsFormat.R16_UNorm);
+                AO_Previous_RT.Create();
             }
         }
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)

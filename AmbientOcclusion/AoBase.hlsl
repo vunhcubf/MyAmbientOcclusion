@@ -1,6 +1,5 @@
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareNormalsTexture.hlsl"
-#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/UnityGBuffer.hlsl"
 
 #if defined FULL_PRECISION_AO
@@ -12,7 +11,16 @@
 #define half3x3 float3x3
 #endif
 
-#define SKYBOX_MASK step(GetEyeDepth(uv),9986)
+//declaredepth这个库，指定lod等级
+TEXTURE2D_X_FLOAT(_CameraDepthTexture);
+SamplerState Point_Clamp;
+SamplerState Linear_Clamp;
+half SampleSceneDepth(half2 uv)
+{
+    return SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, Point_Clamp, UnityStereoTransformScreenSpaceTex(uv),0).r;
+}
+//*******************************
+
 #define NOISEINPUTSCALE 1000.0f
 #define RADIUSSCALE_GTAO 500.0f
 #define RADIUSSCALE_HBAO 100.0f
@@ -36,6 +44,9 @@ half4 _CameraDepthTexture_TexelSize;
 ////函数
 half Pow2(half x){
     return x*x;
+}
+bool GetSkyBoxMask(half2 uv){
+    return step(SampleSceneDepth(uv),0);
 }
 half Noise2D(half2 p)
 {
@@ -74,7 +85,7 @@ half3 GetPositionVs(half2 uv){
 half3 GetNormalVs(half2 uv){
     half3 Norm=SampleSceneNormals(uv);
     Norm=mul((half3x3)World2View_Matrix,Norm);
-    return normalize(Norm)*SKYBOX_MASK;
+    return normalize(Norm);
 }
 //左下角原点的屏幕uv
 half2 GetScreenUv(half3 ViewPos){
@@ -231,7 +242,9 @@ VertexOutput Vert_PostProcessDefault(VertexInput v)
     return o;
 }
 
-half4 Frag_HBAO(VertexOutput i):SV_Target{
+half Frag_HBAO(VertexOutput i):SV_Target{
+    [branch]
+    if(GetSkyBoxMask(i.uv)){return 1.0;}
     //正确的世界坐标return mul(View2World_Matrix,half4(BuildViewPos(i.uv),1));
     half3 PositionVs = GetPositionVs(i.uv);
     //return half4(GetScreenUv(PositionVS),0,1);
@@ -243,10 +256,12 @@ half4 Frag_HBAO(VertexOutput i):SV_Target{
     half Ao=GetHBAO(i.uv,PositionVs,Norm);
     Ao=saturate(1.0-2.0*Ao);
     Ao=pow(Ao,Intensity);
-    return half4(Ao,Ao,Ao,1);
+    return Ao;
 }
 
-half4 Frag_GTAO(VertexOutput i):SV_Target{
+half Frag_GTAO(VertexOutput i):SV_Target{
+    [branch]
+    if(GetSkyBoxMask(i.uv)){return 1.0;}
     half3 PositionVs = GetPositionVs(i.uv);
     if (-PositionVs.z > MAXDISTANCE)
     {
@@ -255,5 +270,5 @@ half4 Frag_GTAO(VertexOutput i):SV_Target{
     half3 Norm=GetNormalVs(i.uv);
     half AO=GetGTAO(i.uv,PositionVs,Norm);
     AO=pow(AO,Intensity);
-    return half4(AO,AO,AO,1);
+    return AO;
 }
