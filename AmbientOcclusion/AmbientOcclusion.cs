@@ -9,19 +9,19 @@ using System;
 public class AmbientOcclusion : ScriptableRendererFeature
 {
     [System.Serializable]
-    public class DenoiseSettings
+    public class Setting
     {
-        [InspectorToggleLeft] public bool SpatialFilter = true;
-        [InspectorToggleLeft] public bool TemporalFilter = true;
-        [Range(0f, 40f)] public float BlurSharpness = 1;
-        [Range(2, 10)] public int Kernel_Radius = 5;
-        [Range(0f, 1f)] public float TemporalFilterIntensity = 0.2f;
-    }
-    [System.Serializable]
-    public class AOSettings
-    {
+        public string RenderPassName = "GTAO";
+        public RenderPassEvent passEvent = RenderPassEvent.BeforeRenderingPostProcessing;
+        public int passEventOffset = 1;
+        [InspectorToggleLeft] public bool Debug = false;
+        public bool FullPrecision = false;
+
+        [Space(10)]
+        [Header("AO设置")]
+        public AO_Methods AOMethod = AO_Methods.GTAO;
         [InspectorToggleLeft] public bool TemporalJitter = true;
-        [Range(0f, 10f)] public float Intensity = 1;
+        [Range(0f, 5f)] public float Intensity = 1;
         [Range(0f, 1f)] public float Radius = 0.5f;
         [Range(1, 10)] public int Num_Direction = 4;
         [Range(3, 50)] public int Num_Step = 8;
@@ -29,25 +29,22 @@ public class AmbientOcclusion : ScriptableRendererFeature
         [Range(0f, 1f)] public float AoDistanceAttenuation = 0.1f;
         [Range(1, 2000)] public int MaxDistance = 1000;
         [InspectorToggleLeft] public bool MultiBounce = true;
-    }
-    [System.Serializable]
-    public class RenderBasicSettings
-    {
-        public string RenderPassName = "GTAO";
-        public RenderPassEvent passEvent = RenderPassEvent.BeforeRenderingPostProcessing;
-        public int passEventOffset = 1;
-        [InspectorToggleLeft] public bool Debug = false;
-        public AO_Methods AOMethod = AO_Methods.GTAO;
-        public bool FullPrecision = false;
+
+        [Space(10)]
+        [Header("降噪设置")]
+        [InspectorToggleLeft] public bool SpatialFilter = true;
+        [InspectorToggleLeft] public bool TemporalFilter = true;
+        [Range(0f, 40f)] public float BlurSharpness = 1;
+        [Range(2, 10)] public int Kernel_Radius = 5;
+        [Range(0f, 1f)] public float TemporalFilterIntensity = 0.2f;
     }
     public enum AO_Methods
     {
         GTAO,
         HBAO_Plus
     };
-    public RenderBasicSettings Render_Basic_Settings = new RenderBasicSettings();
-    public AOSettings AO_Settings = new AOSettings();
-    public DenoiseSettings Denoise_Settings = new DenoiseSettings();
+    public Setting Settings = new Setting();
+
     class RenderPass : ScriptableRenderPass
     {
         private static readonly int P_World2View_Matrix_ID = Shader.PropertyToID("World2View_Matrix");
@@ -83,14 +80,10 @@ public class AmbientOcclusion : ScriptableRendererFeature
         private RenderTexture AO_Previous_RT;
         public Material BlurMaterial;
 
-        private DenoiseSettings Denoise_Settings;
-        private AOSettings AO_Settings;
-        private RenderBasicSettings Render_Basic_Settings;
-        public RenderPass(DenoiseSettings a, AOSettings b, RenderBasicSettings c)
+        private Setting Settings;
+        public RenderPass(Setting Settings)
         {
-            Denoise_Settings = a;
-            AO_Settings = b;
-            Render_Basic_Settings = c;
+            this.Settings = Settings;
         }
         public override void Configure(CommandBuffer cmd, RenderTextureDescriptor cameraTextureDescriptor)
         {
@@ -101,7 +94,7 @@ public class AmbientOcclusion : ScriptableRendererFeature
         {
             var camera = renderingData.cameraData.camera;
             //历史信息
-            if (AO_Previous_RT is null)
+            if (AO_Previous_RT is null || AO_Previous_RT.IsDestroyed())
             {
                 AO_Previous_RT = new RenderTexture(camera.pixelWidth, camera.pixelHeight, 0, GraphicsFormat.R16_UNorm);
                 AO_Previous_RT.Create();
@@ -133,30 +126,30 @@ public class AmbientOcclusion : ScriptableRendererFeature
 
             AoMaterial.SetFloat(P_fov_ID, camera.fieldOfView);
 
-            AoMaterial.SetFloat(P_RADIUS_ID, AO_Settings.Radius);
-            AoMaterial.SetInt(P_DIRECTIONCOUNT_ID, AO_Settings.Num_Direction);
-            AoMaterial.SetInt(P_STEPCOUNT_ID, AO_Settings.Num_Step);
-            AoMaterial.SetInt(P_MAXDISTANCE_ID, AO_Settings.MaxDistance);
+            AoMaterial.SetFloat(P_RADIUS_ID, Settings.Radius);
+            AoMaterial.SetInt(P_DIRECTIONCOUNT_ID, Settings.Num_Direction);
+            AoMaterial.SetInt(P_STEPCOUNT_ID, Settings.Num_Step);
+            AoMaterial.SetInt(P_MAXDISTANCE_ID, Settings.MaxDistance);
 
-            AoMaterial.SetFloat(P_AngleBias_ID, AO_Settings.AngleBias);
-            AoMaterial.SetFloat(P_AoDistanceAttenuation_ID, AO_Settings.AoDistanceAttenuation);
-            AoMaterial.SetFloat(P_Intensity_ID, AO_Settings.Intensity);
+            AoMaterial.SetFloat(P_AngleBias_ID, Settings.AngleBias);
+            AoMaterial.SetFloat(P_AoDistanceAttenuation_ID, Settings.AoDistanceAttenuation);
+            AoMaterial.SetFloat(P_Intensity_ID, Settings.Intensity);
 
-            BlurMaterial.SetFloat(P_BlurSharpness_ID, Denoise_Settings.BlurSharpness);
-            BlurMaterial.SetInt(P_KernelRadius_ID, Denoise_Settings.Kernel_Radius);
+            BlurMaterial.SetFloat(P_BlurSharpness_ID, Settings.BlurSharpness);
+            BlurMaterial.SetInt(P_KernelRadius_ID, Settings.Kernel_Radius);
 
-            if (AO_Settings.TemporalJitter) { AoMaterial.EnableKeyword("USE_TEMPORALNOISE"); }
-            if (Render_Basic_Settings.FullPrecision) { AoMaterial.EnableKeyword("FULL_PRECISION_AO"); BlurMaterial.EnableKeyword("FULL_PRECISION_AO"); }
-            if (AO_Settings.MultiBounce) { BlurMaterial.EnableKeyword("MULTI_BOUNCE_AO"); }
+            if (Settings.TemporalJitter) { AoMaterial.EnableKeyword("USE_TEMPORALNOISE"); }
+            if (Settings.FullPrecision) { AoMaterial.EnableKeyword("FULL_PRECISION_AO"); BlurMaterial.EnableKeyword("FULL_PRECISION_AO"); }
+            if (Settings.MultiBounce) { BlurMaterial.EnableKeyword("MULTI_BOUNCE_AO"); }
 
-            CommandBuffer cmd = CommandBufferPool.Get(Render_Basic_Settings.RenderPassName);
+            CommandBuffer cmd = CommandBufferPool.Get(Settings.RenderPassName);
             using (new ProfilingScope(cmd, profilingSampler))
             {
                 cmd.GetTemporaryRT(RT_AoBase_ID, AoTextureDesc, FilterMode.Point);
                 cmd.GetTemporaryRT(RT_AoBlur_Spatial_X_ID, AoTextureDesc, FilterMode.Point);
                 cmd.GetTemporaryRT(RT_AoBlur_Spatial_Y_ID, AoTextureDesc, FilterMode.Point);
                 cmd.GetTemporaryRT(AO_Current_RT_ID, AoTextureDesc, FilterMode.Point);
-                if (AO_Settings.MultiBounce)
+                if (Settings.MultiBounce)
                 {
                     cmd.GetTemporaryRT(RT_MultiBounce_Out_ID, AoTextureDesc_Color, FilterMode.Point);
                 }
@@ -170,14 +163,14 @@ public class AmbientOcclusion : ScriptableRendererFeature
                 cmd.SetViewProjectionMatrices(Matrix4x4.identity, Matrix4x4.identity);
                 //绘制AO
                 cmd.SetRenderTarget(RT_AoBase_ID);
-                if (Render_Basic_Settings.AOMethod is AO_Methods.GTAO) { cmd.DrawMesh(RenderingUtils.fullscreenMesh, Matrix4x4.identity, AoMaterial, 0, 1); }
-                else if (Render_Basic_Settings.AOMethod is AO_Methods.HBAO_Plus) { cmd.DrawMesh(RenderingUtils.fullscreenMesh, Matrix4x4.identity, AoMaterial, 0, 0); }
+                if (Settings.AOMethod is AO_Methods.GTAO) { cmd.DrawMesh(RenderingUtils.fullscreenMesh, Matrix4x4.identity, AoMaterial, 0, 1); }
+                else if (Settings.AOMethod is AO_Methods.HBAO_Plus) { cmd.DrawMesh(RenderingUtils.fullscreenMesh, Matrix4x4.identity, AoMaterial, 0, 0); }
 
                 //时间滤波
-                if (Denoise_Settings.TemporalFilter)
+                if (Settings.TemporalFilter)
                 {
                     cmd.SetGlobalTexture(RT_Temporal_In_ID, RT_AoBase_ID);
-                    BlurMaterial.SetFloat(P_TemporalFilterIntensity_ID, Denoise_Settings.TemporalFilterIntensity);
+                    BlurMaterial.SetFloat(P_TemporalFilterIntensity_ID, Settings.TemporalFilterIntensity);
                     cmd.SetRenderTarget(AO_Current_RT_ID);
                     BlurMaterial.SetTexture(AO_Previous_RT_ID, AO_Previous_RT);
                     cmd.DrawMesh(RenderingUtils.fullscreenMesh, Matrix4x4.identity, BlurMaterial, 0, 4);
@@ -186,7 +179,7 @@ public class AmbientOcclusion : ScriptableRendererFeature
                 else { cmd.CopyTexture(RT_AoBase_ID, AO_Current_RT_ID); }
 
                 //双边滤波
-                if (Denoise_Settings.SpatialFilter)
+                if (Settings.SpatialFilter)
                 {
                     cmd.SetGlobalTexture(RT_Spatial_In_X_ID, AO_Current_RT_ID);
                     cmd.SetRenderTarget(RT_AoBlur_Spatial_X_ID);
@@ -198,7 +191,7 @@ public class AmbientOcclusion : ScriptableRendererFeature
                 }
                 else { cmd.CopyTexture(AO_Current_RT_ID, RT_AoBlur_Spatial_Y_ID); }
                 //MultiBounce
-                if (AO_Settings.MultiBounce)
+                if (Settings.MultiBounce)
                 {
                     cmd.SetGlobalTexture(RT_MultiBounce_In_ID, RT_AoBlur_Spatial_Y_ID);
                     cmd.SetRenderTarget(RT_MultiBounce_Out_ID);
@@ -208,7 +201,7 @@ public class AmbientOcclusion : ScriptableRendererFeature
 
                 //拷贝到屏幕
                 cmd.SetGlobalTexture(GLOBAL_RT_AmbientOcclusion_ID, RT_MultiBounce_Out_ID);
-                if (Render_Basic_Settings.Debug)
+                if (Settings.Debug)
                 {
                     cmd.SetRenderTarget(renderingData.cameraData.renderer.cameraColorTarget);
                     cmd.DrawMesh(RenderingUtils.fullscreenMesh, Matrix4x4.identity, BlurMaterial, 0, 5);
@@ -232,8 +225,8 @@ public class AmbientOcclusion : ScriptableRendererFeature
     private RenderPass RenderPass_Instance;
     public override void Create()
     {
-        RenderPass_Instance = new RenderPass(Denoise_Settings, AO_Settings, Render_Basic_Settings);
-        RenderPass_Instance.renderPassEvent = Render_Basic_Settings.passEvent + Render_Basic_Settings.passEventOffset;
+        RenderPass_Instance = new RenderPass(Settings);
+        RenderPass_Instance.renderPassEvent = Settings.passEvent + Settings.passEventOffset;
     }
 
 
